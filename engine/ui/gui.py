@@ -86,13 +86,35 @@ class Panel(Control):
         pygame.draw.rect(screen, (100, 100, 110), (*abs_pos, *self.rect.size), 2)
 
 class Button(Control):
-    def __init__(self, text, x, y, w, h, color=(70, 70, 80), **kwargs):
+    def __init__(self, text, x, y, w, h, color=(70, 70, 80), on_click=None, **kwargs):
+        # Control.__init__ does not accept 'on_click', so we handle it here.
         super().__init__(x, y, w, h, **kwargs)
         self.text = text
         self.base_color = color
+        self.on_click = on_click # Store on_click callback in Button instance
         self.label = Label(text, 0, 0, size=16)
         self.label.hit_test = False # [중요] 버튼 텍스트가 클릭을 막지 않도록 설정
         self.add_child(self.label)
+
+    def handle_event(self, event, parent_abs_pos=(0, 0)):
+        # Inherit Control's handle_event for basic logic like hover and focus.
+        # We override here to add the on_click functionality.
+        if not self.visible: return False
+        
+        self_abs_rect = self.rect.move(parent_abs_pos)
+
+        # First, check if the event occurred within the button's bounds.
+        if event.type == pygame.MOUSEBUTTONDOWN and self.hit_test and self_abs_rect.collidepoint(event.pos):
+            if self.on_click:
+                self.on_click()
+            return True # Event handled by the button
+
+        # Delegate to parent's handle_event for hover/focus and child events
+        # Note: Control's handle_event also calls on_click if it's defined on Control,
+        # but our Button.__init__ stores it on the Button instance itself.
+        # For simplicity and to ensure Button's specific logic runs, we handle it here.
+        # If Button had complex child event handling, it would need more override.
+        return super().handle_event(event, parent_abs_pos)
 
     def _draw_self(self, screen, services, abs_pos):
         color = (100, 100, 110) if self.is_hovered else self.base_color

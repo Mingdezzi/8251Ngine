@@ -25,15 +25,14 @@ class TileMap(Node):
         
         self.map_surface = pygame.Surface((iso_w, iso_h), pygame.SRCALPHA)
         
-        # 2. 바닥 타일만 순회하며 서피스에 그리기
-        floor_blocks = [b for b in blocks if str(b.get("tile_id", ""))[0] == '1']
-
-        for block_data in floor_blocks:
+        # 2. 모든 블록을 순회하며 서피스에 그리기
+        #    기존에는 바닥 타일만 필터링했으나, 이제 오브젝트 등도 렌더링하도록 변경
+        for block_data in blocks: # Removed filtering for floor_blocks
             pos = block_data["pos"]
             tid = block_data["tile_id"]
             
             if tid:
-                # TileEngine에서 좀보이드 스타일 텍스처 가져오기
+                # TileEngine에서 텍스처 가져오기
                 tile_tex = TileEngine.create_texture(tid)
                 if tile_tex:
                     # Cartesian 좌표(pos)를 Isometric 화면 좌표로 변환
@@ -45,7 +44,7 @@ class TileMap(Node):
                     
                     self.map_surface.blit(tile_tex, (screen_x + offset_x, screen_y))
         
-        print(f"[TileMap] Generated floor map surface ({iso_w}x{iso_h}) with {len(floor_blocks)} tiles.")
+        print(f"[TileMap] Generated map surface ({iso_w}x{iso_h}) with {len(blocks)} blocks.") # Updated print statement
 
     def get_sprite(self):
         # Renderer가 이 서피스를 직접 사용하도록 반환
