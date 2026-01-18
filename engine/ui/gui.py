@@ -15,162 +15,127 @@ class Control:
         child.parent = self
         self.children.append(child)
 
-    def handle_event(self, event):
+    def handle_event(self, event, parent_abs_pos=(0, 0)):
         if not self.visible: return False
-        
-        # 자식 요소들부터 이벤트 처리 (레이어 순서 고려)
+
+        self_abs_rect = self.rect.move(parent_abs_pos)
+
+        # 자식부터 역순으로 처리해야 올바르게 클릭 이벤트를 소비함
         for child in reversed(self.children):
-            if child.handle_event(event):
+            if child.handle_event(event, self_abs_rect.topleft):
                 return True
 
-        if event.type == pygame.MOUSEMOTION:
-            self.is_hovered = self.rect.collidepoint(event.pos)
-        
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            was_focused = self.is_focused
-            self.is_focused = self.is_hovered
-            if self.is_hovered:
-                if self.on_click: self.on_click()
-                return True
-            return was_focused # Return true if we were focused but clicked away (to consume event)
-        
+        # 현재 컨트롤의 이벤트 처리
+        if hasattr(event, 'pos'):
+            if self_abs_rect.collidepoint(event.pos):
+                if event.type == pygame.MOUSEMOTION:
+                    self.is_hovered = True
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    self.is_focused = True
+                    if self.on_click:
+                        self.on_click()
+                    return True
+            else:
+                self.is_hovered = False
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    self.is_focused = False # 다른 곳 클릭 시 포커스 해제
+
+        if self.is_focused and event.type == pygame.KEYDOWN:
+            # LineEdit와 같은 자식 클래스에서 오버라이드하여 처리
+            return False
+
         return False
 
-    def draw(self, screen, services):
+    def draw(self, screen, services, parent_abs_pos=(0, 0)):
         if not self.visible: return
-        self._draw_self(screen, services)
+        
+        self_abs_pos = (self.rect.x + parent_abs_pos[0], self.rect.y + parent_abs_pos[1])
+        
+        self._draw_self(screen, services, self_abs_pos)
+        
         for child in self.children:
-            child.draw(screen, services)
+            child.draw(screen, services, self_abs_pos)
 
-    def _draw_self(self, screen, services):
+    def _draw_self(self, screen, services, abs_pos):
         pass
 
-    def get_child_by_tag(self, tag):
-        for child in self.children:
-            if child.tag == tag: return child
-            res = child.get_child_by_tag(tag)
-            if res: return res
-        return None
-
-    def to_dict(self):
-        return {
-            "type": self.__class__.__name__,
-            "rect": [self.rect.x, self.rect.y, self.rect.width, self.rect.height],
-            "visible": self.visible,
-            "tag": self.tag,
-            "children": [c.to_dict() for c in self.children]
-        }
-
 class Label(Control):
-    def __init__(self, text="Label", x=0, y=0, size=20, color=(255, 255, 255), tag=""):
-        super().__init__(x, y, 100, size, tag)
-        self.text = text
-        self.color = color
-        self.size = size
+    def __init__(self, text, x, y, size=20, color=(255, 255, 255), **kwargs):
+        super().__init__(x, y, 1, 1, **kwargs)
+        self.text = text; self.color = color; self.size = size
         self.font = pygame.font.SysFont("arial", size, bold=True)
-        self._surf = None
         self._render_text()
 
-    def set_text(self, text):
-        if self.text != text:
-            self.text = text
-            self._render_text()
-
     def _render_text(self):
-        self._surf = self.font.render(str(self.text), True, self.color)
-        self.rect.width, self.rect.height = self._surf.get_size()
+        self.surf = self.font.render(self.text, True, self.color)
+        self.rect.size = self.surf.get_size()
 
-    def _draw_self(self, screen, services):
-        if self._surf:
-            screen.blit(self._surf, (self.rect.x, self.rect.y))
-
-    def to_dict(self):
-        d = super().to_dict()
-        d.update({"text": self.text, "size": self.size, "color": list(self.color)})
-        return d
+    def _draw_self(self, screen, services, abs_pos):
+        screen.blit(self.surf, abs_pos)
 
 class Panel(Control):
-    def __init__(self, x, y, w, h, color=(50, 50, 50, 200), tag=""):
-        super().__init__(x, y, w, h, tag)
+    def __init__(self, x, y, w, h, color=(50, 50, 60, 200), **kwargs):
+        super().__init__(x, y, w, h, **kwargs)
         self.color = color
-        self._regen_surf()
 
-    def _regen_surf(self):
-        self.surf = pygame.Surface((max(1, self.rect.width), max(1, self.rect.height)), pygame.SRCALPHA)
-        self.surf.fill(self.color)
-
-    def _draw_self(self, screen, services):
-        pygame.draw.rect(screen, (100, 100, 100), self.rect, 2)
-        screen.blit(self.surf, (self.rect.x, self.rect.y))
-
-    def to_dict(self):
-        d = super().to_dict()
-        d.update({"color": list(self.color)})
-        return d
+    def _draw_self(self, screen, services, abs_pos):
+        pygame.draw.rect(screen, self.color, (*abs_pos, *self.rect.size))
+        pygame.draw.rect(screen, (100, 100, 110), (*abs_pos, *self.rect.size), 2)
 
 class Button(Control):
-    def __init__(self, text, x, y, w, h, color=(70, 70, 70), hover_color=(100, 100, 100), tag=""):
-        super().__init__(x, y, w, h, tag)
+    def __init__(self, text, x, y, w, h, color=(70, 70, 80), **kwargs):
+        super().__init__(x, y, w, h, **kwargs)
         self.text = text
         self.base_color = color
-        self.hover_color = hover_color
         self.label = Label(text, 0, 0, size=16)
+        # 라벨의 위치는 draw 시점에 부모(버튼)의 중앙으로 계산
         self.add_child(self.label)
 
-    def _draw_self(self, screen, services):
-        color = self.hover_color if self.is_hovered else self.base_color
-        pygame.draw.rect(screen, color, self.rect)
-        pygame.draw.rect(screen, (200, 200, 200), self.rect, 1)
-        
-        tw, th = self.label._surf.get_size()
-        self.label.rect.x = self.rect.x + (self.rect.width - tw) // 2
-        self.label.rect.y = self.rect.y + (self.rect.height - th) // 2
+    def _draw_self(self, screen, services, abs_pos):
+        color = (100, 100, 110) if self.is_hovered else self.base_color
+        pygame.draw.rect(screen, color, (*abs_pos, *self.rect.size))
+        pygame.draw.rect(screen, (120, 120, 130), (*abs_pos, *self.rect.size), 1)
 
-    def to_dict(self):
-        d = super().to_dict()
-        d.update({"text": self.text, "base_color": list(self.base_color), "hover_color": list(self.hover_color)})
-        return d
+        # 라벨을 버튼의 중앙에 위치시키기
+        text_w, text_h = self.label.rect.size
+        self.label.rect.x = self.rect.w / 2 - text_w / 2
+        self.label.rect.y = self.rect.h / 2 - text_h / 2
 
 class LineEdit(Control):
-    def __init__(self, text="", x=0, y=0, w=200, h=30, tag=""):
-        super().__init__(x, y, w, h, tag)
-        self.text = str(text)
-        self.on_text_changed = None # Callback (text) -> None
-        self.font = pygame.font.SysFont("arial", 18)
-        self.cursor_visible = True
-        self.cursor_timer = 0
+    def __init__(self, text, x, y, w, h, **kwargs):
+        super().__init__(x, y, w, h, **kwargs)
+        self.text = text
+        self.last_input_time = 0
+        self.input_cooldown = 100 # 100ms 쿨다운
 
-    def handle_event(self, event):
-        if super().handle_event(event): return True
-        
+    def handle_event(self, event, parent_abs_pos=(0, 0)):
+        self_abs_rect = self.rect.move(parent_abs_pos)
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            self.is_focused = self_abs_rect.collidepoint(event.pos)
+            return self.is_focused
+
         if self.is_focused and event.type == pygame.KEYDOWN:
+            now = pygame.time.get_ticks()
+            if now - self.last_input_time < self.input_cooldown:
+                return True # 쿨다운 중이면 이벤트 소비만 함
+
             if event.key == pygame.K_BACKSPACE:
                 self.text = self.text[:-1]
+                self.last_input_time = now
             elif event.key == pygame.K_RETURN:
                 self.is_focused = False
-            else:
-                if event.unicode.isprintable():
-                    self.text += event.unicode
-            
-            if self.on_text_changed:
-                self.on_text_changed(self.text)
+            elif event.unicode.isprintable():
+                self.text += event.unicode
+                self.last_input_time = now
             return True
         return False
 
-    def _draw_self(self, screen, services):
-        # Draw background
-        bg_col = (40, 40, 45) if not self.is_focused else (60, 60, 70)
-        pygame.draw.rect(screen, bg_col, self.rect)
-        border_col = (100, 100, 255) if self.is_focused else (100, 100, 100)
-        pygame.draw.rect(screen, border_col, self.rect, 2)
+    def _draw_self(self, screen, services, abs_pos):
+        bg = (80, 80, 90) if self.is_focused else (50, 50, 60)
+        pygame.draw.rect(screen, bg, (*abs_pos, *self.rect.size))
+        pygame.draw.rect(screen, (120, 120, 130), (*abs_pos, *self.rect.size), 1)
         
-        # Draw text
-        txt_surf = self.font.render(self.text, True, (255, 255, 255))
-        screen.blit(txt_surf, (self.rect.x + 5, self.rect.y + (self.rect.height - txt_surf.get_height()) // 2))
-        
-        # Draw cursor
-        if self.is_focused:
-            self.cursor_timer += 1
-            if (self.cursor_timer // 30) % 2 == 0:
-                cx = self.rect.x + 8 + txt_surf.get_width()
-                pygame.draw.line(screen, (255, 255, 255), (cx, self.rect.y + 5), (cx, self.rect.bottom - 5), 2)
+        font = pygame.font.SysFont("arial", 18)
+        text_surf = font.render(self.text, True, (220, 220, 230))
+        screen.blit(text_surf, (abs_pos[0] + 5, abs_pos[1] + self.rect.h / 2 - text_surf.get_height() / 2))

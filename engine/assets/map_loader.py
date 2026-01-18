@@ -1,46 +1,26 @@
 import json
 import os
-from engine.graphics.block import Block3D
 
 class MapLoader:
     @staticmethod
-    def load_map(path, scene, collision_world):
+    def load_map_data(path):
+        """
+        JSON 맵 파일을 파싱하여 전체 데이터 딕셔너리를 반환합니다.
+        """
         if not os.path.exists(path):
             print(f"MapLoader: File not found {path}")
-            return None # Return None to indicate failure or no metadata
+            return None
 
         with open(path, 'r') as f:
             data = json.load(f)
 
-        # 1. Load Metadata (New)
-        metadata = {
-            "width": data.get("width", 20),
-            "height": data.get("height", 20)
-        }
-
-        # 2. Load Blocks
-        for b_data in data.get("blocks", []):
-            block = Block3D(
-                name=b_data.get("name", "Wall"),
-                size_z=b_data.get("size_z", 1.0),
-                color=tuple(b_data.get("color", (100, 100, 110))),
-                zone_id=b_data.get("zone_id", 0),
-                interact_type=b_data.get("interact_type", "NONE"),
-                tile_id=b_data.get("tile_id", None)
-            )
-            block.position.x = b_data["pos"][0]
-            block.position.y = b_data["pos"][1]
-            block.position.z = b_data["pos"][2]
-            scene.add_child(block)
-            if collision_world and b_data.get("is_static", True):
-                collision_world.add_static(block)
-
-        print(f"MapLoader: Successfully loaded {path}")
-        return metadata
+        print(f"MapLoader: Successfully parsed {path}")
+        return data
 
     @staticmethod
     def save_map(path, scene, width=20, height=20):
-        # Implementation for Game Editor to save changes
+        # 저장 로직은 EditorScene에서 사용하므로 유지
+        from engine.graphics.block import Block3D
         data = {
             "width": width,
             "height": height,

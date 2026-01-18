@@ -23,8 +23,8 @@ class WorldPopupManager:
     def __init__(self):
         self.popups = []
 
-    def add_popup(self, text, x, y, z, color=(255, 255, 255)):
-        self.popups.append(Popup(text, x, y, z, color))
+    def add_popup(self, text, x, y, z, color=(255, 255, 255), duration=1.5):
+        self.popups.append(Popup(text, x, y, z, color, duration))
 
     def update(self, dt):
         self.popups = [p for p in self.popups if p.update(dt)]

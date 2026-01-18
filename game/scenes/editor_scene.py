@@ -1,292 +1,358 @@
 import pygame
-import random
 import json
 import os
-import math
 from engine.core.node import Node
-from engine.graphics.tile_node import TileNode
-from engine.core.math_utils import IsoMath
-from engine.assets.map_loader import MapLoader
-from engine.assets.ui_loader import UILoader
-from engine.assets.tile_engine import TileEngine
-from engine.ui.gui import Control, Label, Panel, Button, LineEdit
-
-# Components
-from engine.core.status import StatusComponent
-from engine.core.inventory import InventoryComponent
-from engine.core.ai import AdvancedAIComponent
+from engine.core.math_utils import IsoMath, TILE_WIDTH, TILE_HEIGHT
+from engine.graphics.tilemap import TileMap
+from engine.graphics.wall import WallNode
+from engine.graphics.block import Block3D
+from engine.ui.gui import Panel, Button, Label, LineEdit # LineEdit 추가
 
 class EditorScene(Node):
     def __init__(self):
         super().__init__("EditorScene")
-        self.layers = {0: {}, 1: {}, 2: {}}
-        self.entities = {}
-        self.ui_root = Control(0, 0, 1280, 720)
+        self.is_initialized = False
+        self.map_data = {}
+        self.tile_map = TileMap()
+        self.add_child(self.tile_map)
         
-        self.selected_obj = None
-        self.is_playing = False
-        self.initialized = False
+        self.wall_nodes = {}
+        self.object_nodes = {}
         
-        self.panel_width = 280
-        self.hierarchy_width = 200
-        
-        self.mode = "TILES"
-        self.current_category = "FLOORS"
-        self.map_width, self.map_height = 30, 30
-        
-        self.brush_tile_id = 1110000
-        self.brush_size_z = 1.0
+        self.mode = "WALL" # WALL, OBJECT, FLOOR
+        self.ui_root = None
+        self.camera = None
+
         self.tileset = {}
+        self.brush_tile_id = 212000000
         self._load_tileset_data()
-        
-        self.hover_grid_pos = (0, 0)
-        self.is_dragging = False
-        self.drag_start = None
-        self.last_screen_size = (0, 0)
 
     def _load_tileset_data(self):
         path = "engine/data/tileset.json"
         if os.path.exists(path):
-            with open(path, 'r') as f: self.tileset = json.load(f)
+            with open(path, 'r', encoding='utf-8') as f: self.tileset = json.load(f)
+        if "WALLS" in self.tileset and self.tileset["WALLS"]:
+            self.brush_tile_id = int(list(self.tileset["WALLS"].keys())[0])
 
     def _ready(self, services):
-        self._services = services
-        if services.get("app"): services["app"].set_ui(self.ui_root)
-        self._update_layout()
+        self.services = services # 서비스 객체 저장
+        self.camera = services["renderer"].camera
+        self._setup_ui(services)
 
-    def _update_layout(self):
+    def _setup_ui(self, services):
         sw, sh = pygame.display.get_surface().get_size()
-        self.ui_root.rect.width, self.ui_root.rect.height = sw, sh
+        self.ui_root = Panel(0, 0, sw, sh, color=(30, 30, 35, 255))
+        services["app"].set_ui(self.ui_root)
+        
+        if not self.is_initialized:
+            self._show_launcher()
+        else:
+            self._show_editor_ui()
+
+    def _show_launcher(self):
+        self.ui_root.children.clear()
+        sw, sh = pygame.display.get_surface().get_size()
+        
+        # Panel을 화면 중앙에 배치
+        panel_w, panel_h = 400, 300
+        panel = Panel(sw/2 - panel_w/2, sh/2 - panel_h/2, panel_w, panel_h)
+        self.ui_root.add_child(panel)
+        
+        # 자식 위젯들은 Panel의 (0,0)을 기준으로 한 상대좌표
+        title = Label("Map Editor", 0, 20, size=32)
+        title.rect.centerx = panel_w / 2
+        panel.add_child(title)
+        
+        btn_new = Button("New Map", 50, 100, 300, 50)
+        panel.add_child(btn_new)
+        btn_new.on_click = self._show_new_map_dialog
+        
+        btn_load = Button("Load Map", 50, 170, 300, 50)
+        panel.add_child(btn_load)
+        btn_load.on_click = self._load_map
+
+    def _show_new_map_dialog(self):
+        self.ui_root.children.clear()
+        sw, sh = pygame.display.get_surface().get_size()
+        
+        panel_w, panel_h = 300, 200
+        dialog = Panel(sw/2 - panel_w/2, sh/2 - panel_h/2, panel_w, panel_h)
+        self.ui_root.add_child(dialog)
+        
+        title = Label("Map Size", 0, 20, size=24)
+        title.rect.centerx = panel_w / 2
+        dialog.add_child(title)
+        
+        dialog.add_child(Label("Width:", 20, 70))
+        self.width_input = LineEdit("50", 90, 65, 180, 30)
+        dialog.add_child(self.width_input)
+        
+        dialog.add_child(Label("Height:", 20, 110))
+        self.height_input = LineEdit("50", 90, 105, 180, 30)
+        dialog.add_child(self.height_input)
+        
+        btn_create = Button("Create", 75, 150, 150, 40)
+        dialog.add_child(btn_create)
+        def create_action():
+            w = int(self.width_input.text) if self.width_input.text.isdigit() else 50
+            h = int(self.height_input.text) if self.height_input.text.isdigit() else 50
+            self._create_new_map(w, h)
+        btn_create.on_click = create_action
+
+    def _create_new_map(self, width, height):
+        self.map_data = {"width": width, "height": height, "blocks": [], "walls": {}}
+        self.is_initialized = True
+        self._setup_ui(self.services) # 저장된 서비스 객체 사용
+        self._rebuild_map_visuals()
+
+    def _load_map(self):
+        path = "assets/maps/new_edge_map.json"
+        if os.path.exists(path):
+            with open(path, "r") as f: self.map_data = json.load(f)
+            self.is_initialized = True
+            self._setup_ui(self.camera.services)
+            self._rebuild_map_visuals()
+            # 로드된 맵의 중심을 카메라가 바라보도록 설정
+            self.camera.position.x = self.map_data["width"] / 2
+            self.camera.position.y = self.map_data["height"] / 2
+        else:
+            print(f"Map file not found: {path}")
+
+    def _show_editor_ui(self):
+        sw, sh = pygame.display.get_surface().get_size()
         self.ui_root.children.clear()
         
-        if not self.initialized:
-            mw, mh = 450, 350
-            mx, my = (sw - mw)//2, (sh - mh)//2
-            launcher = Panel(mx, my, mw, mh, color=(40, 40, 50, 250))
-            self.ui_root.add_child(launcher)
-            launcher.add_child(Label("8251 ENGINE - IDE v1.2", mx + 20, my + 20, 20, (255, 200, 50)))
-            btn_new = Button("NEW PROJECT", mx + 75, my + 100, 300, 50, color=(60, 120, 60))
-            btn_new.on_click = self._init_editor
-            launcher.add_child(btn_new)
-            btn_load = Button("LOAD PROJECT", mx + 75, my + 170, 300, 50, color=(60, 60, 120))
-            btn_load.on_click = self._load_all
-            launcher.add_child(btn_load)
-        else:
-            self.hier_panel = Panel(0, 0, self.hierarchy_width, sh, color=(30, 30, 35, 220))
-            self.ui_root.add_child(self.hier_panel)
-            self._build_hierarchy_content()
-
-            sb_x = sw - self.panel_width
-            self.sidebar = Panel(sb_x, 0, self.panel_width, sh, color=(35, 35, 40, 245))
-            self.ui_root.add_child(self.sidebar)
-            self._build_sidebar_content(sb_x, sh)
-            
-            map_view_w = sw - self.panel_width - self.hierarchy_width
-            self._services["renderer"].camera.offset = pygame.math.Vector2(self.hierarchy_width + map_view_w / 2, sh / 2)
-
-    def _build_hierarchy_content(self):
-        self.hier_panel.add_child(Label("HIERARCHY", 10, 10, 16, (200, 200, 200)))
-        y = 45
-        for i, child in enumerate(self.children):
-            if i > 20: break
-            btn_node = Button(f"{child.tag[:15]}", 5, y, 190, 25, color=(50, 50, 60) if self.selected_obj != child else (80, 80, 150))
-            btn_node.on_click = (lambda c=child: lambda: self._select_object(c))()
-            self.hier_panel.add_child(btn_node); y += 28
-
-    def _build_sidebar_content(self, sb_x, sh):
-        play_txt = "STOP GAME" if self.is_playing else "▶ PLAY GAME"
-        btn_play = Button(play_txt, sb_x + 10, 10, 260, 40, color=(150, 50, 50) if self.is_playing else (50, 150, 50))
-        btn_play.on_click = self._toggle_play_mode
-        self.sidebar.add_child(btn_play)
-
-        tabs = ["TILES", "INSPECT", "SETTINGS"]
-        for i, t in enumerate(tabs):
-            btn = Button(t[:7], sb_x + 10 + (i*85), 60, 80, 30, color=(70,70,80) if self.mode != t else (100,100,150))
-            btn.on_click = (lambda m=t: lambda: self._set_mode(m))()
-            self.sidebar.add_child(btn)
+        editor_sidebar = Panel(sw - 220, 0, 220, sh, color=(35, 35, 40, 245))
+        self.ui_root.add_child(editor_sidebar)
         
-        self.palette_panel = Panel(sb_x + 10, 100, 260, sh - 150, color=(0,0,0,0))
-        self.sidebar.add_child(self.palette_panel)
-        self._refresh_palette()
+        # 모드 전환 버튼
+        btn_wall = Button("Walls", 10, 10, 90, 30)
+        btn_wall.on_click = lambda: self._set_mode("WALL")
+        editor_sidebar.add_child(btn_wall)
+        
+        btn_obj = Button("Objects", 105, 10, 90, 30)
+        btn_obj.on_click = lambda: self._set_mode("OBJECT")
+        editor_sidebar.add_child(btn_obj)
 
-    def _refresh_palette(self):
-        if not self.palette_panel: return
+        # 타일 팔레트
+        self.palette_panel = Panel(10, 50, 200, sh - 120, color=(0,0,0,0))
+        editor_sidebar.add_child(self.palette_panel)
+        self._build_palette()
+
+        # 저장 버튼
+        btn_save = Button("Save Map", 10, sh - 60, 200, 40, color=(60, 120, 60))
+        btn_save.on_click = self._save_map
+        editor_sidebar.add_child(btn_save)
+
+    def _build_palette(self):
         self.palette_panel.children.clear()
-        px, py = self.palette_panel.rect.x + 10, self.palette_panel.rect.y + 10
+        y_offset = 10
         
-        if self.mode == "TILES":
-            # 1. Category Tabs (F, W, D, I)
-            cat_list = ["FLOORS", "WALLS", "DECO", "INTERACT"]
-            for i, c in enumerate(cat_list):
-                btn_c = Button(c[:1], px + i*45, py, 40, 25, color=(80,80,100) if self.current_category != c else (150,150,255))
-                btn_c.on_click = (lambda cat=c: lambda: self._set_category(cat))()
-                self.palette_panel.add_child(btn_c)
-            py += 40
-            
-            # 2. Tile Selection List
-            tiles = self.tileset.get(self.current_category, {})
-            for tid_str, name in list(tiles.items())[:10]:
-                tid = int(tid_str); btn = Button(name[:15], px, py, 230, 30, color=(60,60,70))
-                btn.on_click = (lambda t=tid: lambda: self._set_tile_brush(t))()
-                self.palette_panel.add_child(btn); py += 35
+        category = "WALLS" if self.mode == "WALL" else "OBJECTS"
+        tiles = self.tileset.get(category, {})
+
+        for tid_str, name in tiles.items():
+            tid = int(tid_str)
+            btn = Button(name, 5, y_offset, 190, 25, color=(70,70,80))
+            btn.on_click = (lambda t=tid, n=name: lambda: self._set_brush(t, n))()
+            self.palette_panel.add_child(btn)
+            y_offset += 28
+
+    def _set_brush(self, tid, name):
+        self.brush_tile_id = tid
+        print(f"Brush set to: {name} ({tid})")
+
+    def _set_mode(self, mode):
+        self.mode = mode
+        self._build_palette()
+        print(f"Editor mode set to: {self.mode}")
+
+    def handle_event(self, event):
+        if self.ui_root.handle_event(event): return
+
+        if not self.is_initialized: return # 맵 로드/생성 전에는 조작 불가
+
+        # 드래그하여 벽/사물 그리기/지우기
+        if event.type == pygame.MOUSEMOTION and (event.buttons[0] or event.buttons[2]):
+            self._handle_map_click(event.buttons[0] or event.buttons[2])
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            self._handle_map_click(event.button)
         
-        elif self.mode == "INSPECT":
-            if not self.selected_obj:
-                self.palette_panel.add_child(Label("Select a Node", px, py, 14, (150,150,150)))
-                return
-            obj = self.selected_obj
-            self.palette_panel.add_child(Label(f"Node: {obj.tag}", px, py, 14, (100, 255, 100))); py += 35
-            self.palette_panel.add_child(Label("Tag (ID):", px, py, 12)); py += 18
-            le_tag = LineEdit(obj.tag, px, py, 230, 30); le_tag.on_text_changed = lambda val: setattr(obj, 'tag', val)
-            self.palette_panel.add_child(le_tag); py += 45
-            for comp in obj.components:
-                self.palette_panel.add_child(Label(f"[{comp.__class__.__name__}]", px, py, 13, (255, 200, 50))); py += 25
-                for attr in dir(comp):
-                    if attr.startswith("_") or attr in ["update", "ready", "node"]: continue
-                    val = getattr(comp, attr)
-                    if isinstance(val, (int, float, str)) and not callable(val):
-                        self.palette_panel.add_child(Label(f"{attr}:", px + 10, py, 11)); py += 15
-                        le_v = LineEdit(str(val), px + 10, py, 210, 25)
-                        def make_s(c, a, t): return lambda v: setattr(c, a, t(v)) if v else None
-                        le_v.on_text_changed = make_s(comp, attr, type(val)); self.palette_panel.add_child(le_v); py += 30
-            py += 10
-            btn_add = Button("+ ADD AI COMPONENT", px, py, 230, 35, color=(60, 100, 150))
-            btn_add.on_click = self._add_ai; self.palette_panel.add_child(btn_add)
-
-    def _add_ai(self):
-        if self.selected_obj and not self.selected_obj.get_component(AdvancedAIComponent):
-            self.selected_obj.add_component(AdvancedAIComponent()); self._refresh_palette()
-
-    def _toggle_play_mode(self): self.is_playing = not self.is_playing; self.selected_obj = None; self._update_layout()
-    def _select_object(self, obj): self.selected_obj = obj; self.mode = "INSPECT"; self._refresh_palette()
-    def _init_editor(self): self.initialized = True; self._update_layout()
-    def _set_mode(self, m): self.mode = m; self._refresh_palette()
-    def _set_category(self, c): self.current_category = c; self._refresh_palette()
-    def _set_tile_brush(self, t): self.brush_tile_id = t
-
-    def update(self, dt, services):
-        sw, sh = pygame.display.get_surface().get_size()
-        if (sw, sh) != self.last_screen_size: self.last_screen_size = (sw, sh); self._update_layout()
-        for event in pygame.event.get():
-            self.ui_root.handle_event(event)
-            if event.type == pygame.QUIT: os._exit(0)
-
-        if not self.initialized: return
-
-        if self.is_playing:
-            input_mgr = services["input"]; mv_x, mv_y = input_mgr.get_vector("move_left", "move_right", "move_up", "move_down")
-            for child in self.children:
-                if child.tag == "PLAYER":
-                    child.position.x += mv_x * 5.0 * dt; child.position.y += mv_y * 5.0 * dt
-                    child.is_moving = (mv_x != 0 or mv_y != 0)
-                    services["renderer"].camera.follow(child.position.x, child.position.y)
-            super().update(dt, services); return
-
-        input_mgr = services["input"]; renderer = services["renderer"]
-        mx, my = pygame.mouse.get_pos()
-        if mx < self.hierarchy_width or mx >= sw - self.panel_width: return
-
-        grid_pos = input_mgr.get_mouse_grid_pos(renderer.camera)
-        gx, gy = int(round(grid_pos.x)), int(round(grid_pos.y))
-        self.hover_grid_pos = (gx, gy)
-
-        if pygame.mouse.get_pressed()[0] and not self.is_dragging:
-            found = False
-            for l in [2, 1, 0]:
-                if (gx, gy) in self.layers[l]: self._select_object(self.layers[l][(gx, gy)]); found = True; break
-            if not found: self.selected_obj = None; self._update_layout()
-
-        if pygame.mouse.get_pressed()[0] and not self.selected_obj:
-            if not self.is_dragging: self.is_dragging = True; self.drag_start = (gx, gy); self.drag_mode = 1
-            self.drag_current = (gx, gy)
-        elif pygame.mouse.get_pressed()[2]:
-            if not self.is_dragging: self.is_dragging = True; self.drag_start = (gx, gy); self.drag_mode = 3
-            self.drag_current = (gx, gy)
-        else:
-            if self.is_dragging: self._apply_drag_action(); self.is_dragging = False; self.drag_start = None
-
+        # Camera Pan
         if pygame.mouse.get_pressed()[1]:
-            rel = pygame.mouse.get_rel(); renderer.camera.position.x -= rel[0] / renderer.camera.zoom; renderer.camera.position.y -= rel[1] / renderer.camera.zoom
-        else: pygame.mouse.get_rel()
+            rel = pygame.mouse.get_rel()
+            self.camera.position.x -= rel[0] / self.camera.zoom
+            self.camera.position.y -= rel[1] / self.camera.zoom
 
-    def _apply_drag_action(self):
-        if not self.drag_start or not self.drag_current: return
-        x1, x2 = min(self.drag_start[0], self.drag_current[0]), max(self.drag_start[0], self.drag_current[0])
-        y1, y2 = min(self.drag_start[1], self.drag_current[1]), max(self.drag_start[1], self.drag_current[1])
-        for x in range(x1, x2 + 1):
-            for y in range(y1, y2 + 1):
-                if self.drag_mode == 1: self._place_tile(x, y)
-                else: self._remove_tile(x, y)
-        self._update_layout()
+    def _handle_map_click(self, button):
+        mx, my = pygame.mouse.get_pos()
+        # UI 영역 클릭 시 맵 조작 방지
+        if self.ui_root.children and self.ui_root.children[0].rect.collidepoint((mx, my)): return
+        
+        world_x, world_y = self.camera.screen_to_world(mx, my)
+        gx, gy, edge = self._find_nearest_grid_or_edge(world_x, world_y)
 
-    def _place_tile(self, gx, gy):
-        hw, hh = self.map_width // 2, self.map_height // 2
-        if abs(gx) > hw or abs(gy) > hh: return
-        
-        # Layer Auto-Decision: F->0, W->1, others->2
-        layer = 0
-        if self.current_category == "WALLS": layer = 1
-        elif self.current_category in ["DECO", "INTERACT"]: layer = 2
-        
-        if (gx, gy) in self.layers[layer]:
-            if self.layers[layer][(gx, gy)].tid == self.brush_tile_id: return
-            self.remove_child(self.layers[layer][(gx, gy)])
+        # 맵 범위 체크
+        if not (0 <= gx < self.map_data["width"] and 0 <= gy < self.map_data["height"]):
+            return
+
+        if self.mode == "WALL" and edge != "CENTER":
+            key = (gx, gy, edge)
+            pos_key = f"({gx},{gy})"
+
+            if button == 1: # 좌클릭: 벽 추가
+                if key not in self.wall_nodes:
+                    if pos_key not in self.map_data["walls"]: self.map_data["walls"][pos_key] = []
+                    self.map_data["walls"][pos_key].append(edge)
+                    self._add_wall_node(gx, gy, edge)
             
-        new_tile = TileNode(self.brush_tile_id, gx, gy, layer, self.brush_size_z if layer > 0 else 0.1)
-        new_tile.tag = f"{self.current_category[:1]}_{gx}_{gy}"
-        self.add_child(new_tile); self.layers[layer][(gx, gy)] = new_tile
+            elif button == 3: # 우클릭: 벽 삭제
+                if key in self.wall_nodes:
+                    if pos_key in self.map_data["walls"] and edge in self.map_data["walls"][pos_key]:
+                        self.map_data["walls"][pos_key].remove(edge)
+                        if not self.map_data["walls"][pos_key]: del self.map_data["walls"][pos_key]
+                        self._remove_wall_node(gx, gy, edge)
+        
+        elif self.mode == "OBJECT" and edge == "CENTER":
+            key = (gx, gy)
+            if button == 1: # 좌클릭: 사물 추가
+                if key not in self.object_nodes: # 중복 추가 방지
+                    obj_data = {"pos": [gx, gy, 0], "tile_id": self.brush_tile_id}
+                    self.map_data["blocks"].append(obj_data)
+                    self._add_object_node(gx, gy, self.brush_tile_id)
+            
+            elif button == 3: # 우클릭: 사물 삭제
+                if key in self.object_nodes:
+                    self.map_data["blocks"] = [b for b in self.map_data["blocks"] if not (b["pos"][0] == gx and b["pos"][1] == gy)]
+                    self._remove_object_node(gx, gy)
 
-    def _remove_tile(self, gx, gy):
-        for l in range(3):
-            if (gx, gy) in self.layers[l]: self.remove_child(self.layers[l][(gx, gy)]); del self.layers[l][(gx, gy)]
+    def _find_nearest_grid_or_edge(self, world_x, world_y):
+        cart_x, cart_y = IsoMath.iso_to_cart(world_x, world_y)
+        gx, gy = round(cart_x), round(cart_y)
+        frac_x = cart_x - gx
+        frac_y = cart_y - gy
+        threshold = 0.3
+        if frac_x > threshold and abs(frac_y) < threshold:
+            return gx, gy, "NE"
+        if frac_y > threshold and abs(frac_x) < threshold:
+            return gx, gy, "NW"
+        return gx, gy, "CENTER"
 
-    def _save_all(self):
-        data = {"width": self.map_width, "height": self.map_height, "layers": {0:[], 1:[], 2:[]}}
-        for l_idx, l_data in self.layers.items():
-            for tile in l_data.values(): data["layers"][str(l_idx)].append(tile.to_dict())
-        with open("assets/maps/map_v2.json", "w") as f: json.dump(data, f, indent=4)
-        print("Saved map_v2.json")
+    def _add_wall_node(self, gx, gy, wall_type):
+        key = (gx, gy, wall_type)
+        wall = WallNode(wall_type=wall_type, tile_id=self.brush_tile_id)
+        wall.position.x, wall.position.y = gx, gy
+        self.add_child(wall)
+        self.wall_nodes[key] = wall
 
-    def _load_all(self):
-        path = "assets/maps/map_v2.json"
-        if os.path.exists(path):
-            with open(path, "r") as f: data = json.load(f)
-            self.map_width, self.map_height = data.get("width", 30), data.get("height", 30)
-            for l in range(3):
-                for t in list(self.layers[l].values()): self.remove_child(t)
-                self.layers[l].clear()
-            for l_idx_str, tiles in data.get("layers", {}).items():
-                l_idx = int(l_idx_str)
-                for t in tiles:
-                    nt = TileNode(t["tid"], t["pos"][0], t["pos"][1], t["layer"], t.get("size_z", 0.1))
-                    nt.tag = t.get("tag", f"Node_{int(nt.position.x)}_{int(nt.position.y)}")
-                    self.add_child(nt); self.layers[l_idx][(int(nt.position.x), int(nt.position.y))] = nt
-        self._init_editor()
+    def _remove_wall_node(self, gx, gy, wall_type):
+        key = (gx, gy, wall_type)
+        if key in self.wall_nodes:
+            node = self.wall_nodes.pop(key)
+            self.remove_child(node)
+    
+    def _add_object_node(self, gx, gy, tile_id):
+        key = (gx, gy)
+        node = Block3D(tile_id=tile_id, size_z=0.8)
+        node.position.x, node.position.y = gx, gy
+        self.add_child(node)
+        self.object_nodes[key] = node
+
+    def _remove_object_node(self, gx, gy):
+        key = (gx, gy)
+        if key in self.object_nodes:
+            node = self.object_nodes.pop(key)
+            self.remove_child(node)
+
+    def _rebuild_map_visuals(self):
+        for node in list(self.wall_nodes.values()) + list(self.object_nodes.values()):
+            if node.parent: self.remove_child(node)
+        self.wall_nodes.clear()
+        self.object_nodes.clear()
+
+        # 맵 데이터에서 벽 노드 재생성
+        if "walls" in self.map_data:
+            for pos_str, wall_types in self.map_data["walls"].items():
+                pos = tuple(map(int, pos_str.strip("()").split(",")))
+                for wall_type in wall_types:
+                    self._add_wall_node(pos[0], pos[1], wall_type)
+
+        # 맵 데이터에서 사물 노드 재생성
+        if "blocks" in self.map_data:
+            for b_data in self.map_data["blocks"]:
+                gx, gy = b_data["pos"][0], b_data["pos"][1]
+                tid = b_data["tile_id"]
+                self._add_object_node(gx, gy, tid)
+
+        self.tile_map.load_from_blocks(self.map_data.get("blocks", []), self.map_data["width"], self.map_data["height"])
+
+        print(f"Rebuilt visuals: {len(self.wall_nodes)} walls, {len(self.object_nodes)} objects.")
+
+    def _save_map(self):
+        path = "assets/maps/new_edge_map.json"
+        with open(path, "w") as f:
+            json.dump(self.map_data, f, indent=4)
+        print(f"Saved map to {path}")
 
     def draw_gizmos(self, screen, camera):
-        if not self.initialized: return
-        hw, hh = self.map_width // 2, self.map_height // 2
-        for x in range(-hw, hw + 2):
-            p1 = camera.world_to_screen(*IsoMath.cart_to_iso(x-0.5, -hh-0.5)); p2 = camera.world_to_screen(*IsoMath.cart_to_iso(x-0.5, hh+0.5))
-            pygame.draw.line(screen, (70, 70, 80), p1, p2, 1)
-        for y in range(-hh, hh + 2):
-            p1 = camera.world_to_screen(*IsoMath.cart_to_iso(-hw-0.5, y-0.5)); p2 = camera.world_to_screen(*IsoMath.cart_to_iso(hw+0.5, y-0.5))
-            pygame.draw.line(screen, (70, 70, 80), p1, p2, 1)
-        if not self.is_playing:
-            hx, hy = self.hover_grid_pos
-            if abs(hx) <= hw and abs(hy) <= hh:
-                pts = [camera.world_to_screen(*IsoMath.cart_to_iso(hx-0.5, hy-0.5)), camera.world_to_screen(*IsoMath.cart_to_iso(hx+0.5, hy-0.5)), camera.world_to_screen(*IsoMath.cart_to_iso(hx+0.5, hy+0.5)), camera.world_to_screen(*IsoMath.cart_to_iso(hx-0.5, hy+0.5))]
-                pygame.draw.polygon(screen, (255, 255, 0, 100), pts, 2)
-            if self.selected_obj:
-                sx, sy = camera.world_to_screen(*IsoMath.cart_to_iso(self.selected_obj.position.x, self.selected_obj.position.y))
-                pygame.draw.circle(screen, (255, 255, 0), (int(sx), int(sy)), 20, 3)
-            if self.is_dragging and self.drag_start:
-                dx1, dx2 = min(self.drag_start[0], self.hover_grid_pos[0]), max(self.drag_start[0], self.hover_grid_pos[0])
-                dy1, dy2 = min(self.drag_start[1], self.hover_grid_pos[1]), max(self.drag_start[1], self.hover_grid_pos[1])
-                c1 = camera.world_to_screen(*IsoMath.cart_to_iso(dx1-0.5, dy1-0.5)); c3 = camera.world_to_screen(*IsoMath.cart_to_iso(dx2+0.5, dy2+0.5))
-                c2 = camera.world_to_screen(*IsoMath.cart_to_iso(dx2+0.5, dy1-0.5)); c4 = camera.world_to_screen(*IsoMath.cart_to_iso(dx1-0.5, dy2+0.5))
-                pygame.draw.lines(screen, (0, 255, 255) if self.drag_mode == 1 else (255, 50, 50), True, [c1, c2, c3, c4], 3)
+        if not self.is_initialized: return
 
-    def _draw(self, services):
-        super()._draw(services)
-        self.game_ui_root.draw(services["renderer"].screen, services)
+        w, h = self.map_data["width"], self.map_data["height"]
+
+        # 1. 계층적 그리드 그리기
+        for x in range(w + 1):
+            thickness = 3 if x == w / 2 else (2 if x % 10 == 0 else 1)
+            color = (100, 100, 120) if thickness < 3 else (150, 150, 180)
+            p1 = camera.world_to_screen(*IsoMath.cart_to_iso(x, 0))
+            p2 = camera.world_to_screen(*IsoMath.cart_to_iso(x, h))
+            pygame.draw.line(screen, color, p1, p2, thickness)
+        for y in range(h + 1):
+            thickness = 3 if y == h / 2 else (2 if y % 10 == 0 else 1)
+            color = (100, 100, 120) if thickness < 3 else (150, 150, 180)
+            p1 = camera.world_to_screen(*IsoMath.cart_to_iso(0, y))
+            p2 = camera.world_to_screen(*IsoMath.cart_to_iso(w, y))
+            pygame.draw.line(screen, color, p1, p2, thickness)
+            
+        # 2. 맵 경계선 (붉은색)
+        border_points = [
+            camera.world_to_screen(*IsoMath.cart_to_iso(0, 0)),
+            camera.world_to_screen(*IsoMath.cart_to_iso(w, 0)),
+            camera.world_to_screen(*IsoMath.cart_to_iso(w, h)),
+            camera.world_to_screen(*IsoMath.cart_to_iso(0, h))
+        ]
+        pygame.draw.polygon(screen, (255, 80, 80), border_points, 3)
+
+        # 3. 호버된 경계선 및 미리보기
+        mx, my = pygame.mouse.get_pos()
+        if self.ui_root.rect.collidepoint((mx, my)): return
+        
+        wx, wy = self.camera.screen_to_world(mx, my)
+        gx, gy, edge = self._find_nearest_grid_or_edge(wx, wy)
+
+        # 맵 범위 체크
+        if not (0 <= gx < w and 0 <= gy < h):
+            return
+        
+        preview_node = None
+        if self.mode == "WALL" and edge != "CENTER":
+            preview_node = WallNode(wall_type=edge, tile_id=self.brush_tile_id)
+        elif self.mode == "OBJECT" and edge == "CENTER":
+            preview_node = Block3D(tile_id=self.brush_tile_id, size_z=0.8)
+
+        if preview_node:
+            preview_surf = preview_node.get_sprite()
+            if preview_surf:
+                preview_surf.set_alpha(150)
+                iso_x, iso_y = IsoMath.cart_to_iso(gx, gy)
+                screen_x, screen_y = camera.world_to_screen(iso_x, iso_y)
+                
+                # WallNode와 Block3D의 렌더링 기준점 보정
+                if isinstance(preview_node, WallNode):
+                    # WallNode는 TILE_HEIGHT/2만큼 위로 올라와 그려지므로 y 보정
+                    screen_y -= TILE_HEIGHT / 2 
+                else: # Block3D (사물)
+                    # 사물은 바닥 기준이므로 z-offset을 고려하여 보정
+                    screen_y -= int(preview_node.size_z * HEIGHT_SCALE) # 사물의 시각적 높이만큼 위로 보정
+
+                # 미리보기는 중앙에 위치하도록 보정
+                screen.blit(preview_surf, (screen_x - preview_surf.get_width() / 2, screen_y - preview_surf.get_height() / 2))

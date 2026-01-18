@@ -13,6 +13,7 @@ class GameEntity(AnimatedSprite):
         super().__init__(name)
         self.client_id = client_id
         self.is_moving = False
+        self.facing_direction = pygame.math.Vector2(0, 1) # 초기 방향 (아래)
         
         # --- Components ---
         self.status = self.add_component(StatusComponent())
@@ -52,21 +53,41 @@ class GameEntity(AnimatedSprite):
         self.anim_player.play("idle")
 
     def update(self, dt, services):
-        # 감정에 따른 떨림 효과 적용
-        self.offset_y = self.status.shiver_offset[1] * 0.1
+        # 감정/불안도에 따른 떨림 효과 적용 (Anxiety가 높을수록 심해짐)
+        shiver = self.status.anxiety * 0.05
+        self.offset_y = random.uniform(-shiver, shiver)
+        self.offset_x = random.uniform(-shiver, shiver)
 
-        # 네트워크 보간
+        # 네트워크 보간 및 이동 상태 업데이트
         if self.target_pos:
+            prev_pos = pygame.math.Vector2(self.position.x, self.position.y)
             curr_pos = pygame.math.Vector2(self.position.x, self.position.y)
             new_pos = curr_pos.lerp(self.target_pos, min(1.0, dt * self.lerp_speed))
+            
+            # 이동 방향에 따른 좌우 반전 (Flip)
+            move_dir = new_pos - prev_pos
+            if move_dir.x > 0.01: self.flip_h = False # 오른쪽 방향
+            elif move_dir.x < -0.01: self.flip_h = True # 왼쪽 방향
+            
             self.position.x, self.position.y = new_pos.x, new_pos.y
             self.is_moving = curr_pos.distance_to(self.target_pos) > 0.05
             if not self.is_moving: self.target_pos = None
+        else:
+            # 로컬 이동 시 방향 감지 (PxAnicScene 등에서 직접 이동시킬 때 대응)
+            # 여기서는 Scene에서 위치를 직접 수정하므로, 이전 프레임 위치와 비교
+            if not hasattr(self, "_prev_pos"): self._prev_pos = self.position.copy()
+            move_delta = self.position - self._prev_pos
+            if move_delta.x > 0.001: self.flip_h = False
+            elif move_delta.x < -0.001: self.flip_h = True
+            self._prev_pos = self.position.copy()
 
         if self.is_moving:
             self.anim_player.play("walk")
+            # 걷는 속도에 따라 애니메이션 속도 조절
+            self.anim_player.speed_scale = 1.5 if services["input"].is_action_pressed("run") else 1.0
         else:
             self.anim_player.play("idle")
+            self.anim_player.speed_scale = 1.0
         
         super().update(dt, services)
 

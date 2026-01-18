@@ -6,7 +6,9 @@ class AnimatedSprite(Node):
     def __init__(self, name="AnimatedSprite"):
         super().__init__(name)
         self.anim_player = AnimationPlayer()
-        self.offset_y = 0 # For floating animations
+        self.offset_y = 0
+        self.offset_x = 0
+        self.flip_h = False # Horizontal flip
 
     def update(self, dt, services):
         self.anim_player.update(dt)
@@ -15,7 +17,7 @@ class AnimatedSprite(Node):
     def get_sprite(self):
         frame = self.anim_player.get_current_frame()
         if frame:
-            if self.offset_y != 0:
-                pass
+            if self.flip_h:
+                return pygame.transform.flip(frame, True, False)
             return frame
         return None
