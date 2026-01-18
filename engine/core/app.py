@@ -83,11 +83,12 @@ class App:
                 self.services["renderer"]._update_screen(self.screen)
                 self.services["lighting"].update_resolution(event.w, event.h)
             
-            # [수정됨] 모든 이벤트를 UI와 Scene에 전달
+            # [수정됨] UI가 이벤트를 처리(소비)했으면 Scene으로 전파하지 않음
             if self.ui_root:
-                self.ui_root.handle_event(event)
+                if self.ui_root.handle_event(event):
+                    continue # UI에서 처리된 이벤트는 여기서 종료
             
-            # Scene(Node)이 handle_event 메서드를 가지고 있다면 호출 (Zoom 처리를 위해)
+            # UI가 처리하지 않은 이벤트만 씬으로 전달 (줌, 맵 클릭 등)
             if self.root and hasattr(self.root, 'handle_event'):
                 self.root.handle_event(event)
 

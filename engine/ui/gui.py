@@ -10,6 +10,7 @@ class Control:
         self.is_focused = False
         self.on_click = None
         self.tag = tag
+        self.hit_test = True # [추가] 이벤트 감지 여부 설정
 
     def add_child(self, child):
         child.parent = self
@@ -17,19 +18,24 @@ class Control:
 
     def handle_event(self, event, parent_abs_pos=(0, 0)):
         if not self.visible: return False
+        
+        # [수정] hit_test가 False면 이벤트 무시 (예: 버튼 텍스트)
+        if not self.hit_test: return False
 
         self_abs_rect = self.rect.move(parent_abs_pos)
 
-        # 자식부터 역순으로 처리해야 올바르게 클릭 이벤트를 소비함
+        # 자식부터 역순으로 처리 (위에 있는 것부터)
         for child in reversed(self.children):
             if child.handle_event(event, self_abs_rect.topleft):
-                return True
+                return True # 자식이 이벤트를 처리했으면 부모는 처리 안 함
 
         # 현재 컨트롤의 이벤트 처리
         if hasattr(event, 'pos'):
             if self_abs_rect.collidepoint(event.pos):
                 if event.type == pygame.MOUSEMOTION:
                     self.is_hovered = True
+                    return True # [수정] 호버 상태면 이벤트를 소비하여 아래쪽 UI 호버 방지
+                
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     self.is_focused = True
                     if self.on_click:
@@ -38,21 +44,17 @@ class Control:
             else:
                 self.is_hovered = False
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    self.is_focused = False # 다른 곳 클릭 시 포커스 해제
+                    self.is_focused = False 
 
         if self.is_focused and event.type == pygame.KEYDOWN:
-            # LineEdit와 같은 자식 클래스에서 오버라이드하여 처리
             return False
 
         return False
 
     def draw(self, screen, services, parent_abs_pos=(0, 0)):
         if not self.visible: return
-        
         self_abs_pos = (self.rect.x + parent_abs_pos[0], self.rect.y + parent_abs_pos[1])
-        
         self._draw_self(screen, services, self_abs_pos)
-        
         for child in self.children:
             child.draw(screen, services, self_abs_pos)
 
@@ -64,6 +66,7 @@ class Label(Control):
         super().__init__(x, y, 1, 1, **kwargs)
         self.text = text; self.color = color; self.size = size
         self.font = pygame.font.SysFont("arial", size, bold=True)
+        self.hit_test = False # [추가] 라벨은 기본적으로 클릭 이벤트를 받지 않음
         self._render_text()
 
     def _render_text(self):
@@ -88,7 +91,7 @@ class Button(Control):
         self.text = text
         self.base_color = color
         self.label = Label(text, 0, 0, size=16)
-        # 라벨의 위치는 draw 시점에 부모(버튼)의 중앙으로 계산
+        self.label.hit_test = False # [중요] 버튼 텍스트가 클릭을 막지 않도록 설정
         self.add_child(self.label)
 
     def _draw_self(self, screen, services, abs_pos):
@@ -96,7 +99,6 @@ class Button(Control):
         pygame.draw.rect(screen, color, (*abs_pos, *self.rect.size))
         pygame.draw.rect(screen, (120, 120, 130), (*abs_pos, *self.rect.size), 1)
 
-        # 라벨을 버튼의 중앙에 위치시키기
         text_w, text_h = self.label.rect.size
         self.label.rect.x = self.rect.w / 2 - text_w / 2
         self.label.rect.y = self.rect.h / 2 - text_h / 2
@@ -106,7 +108,7 @@ class LineEdit(Control):
         super().__init__(x, y, w, h, **kwargs)
         self.text = text
         self.last_input_time = 0
-        self.input_cooldown = 100 # 100ms 쿨다운
+        self.input_cooldown = 100
 
     def handle_event(self, event, parent_abs_pos=(0, 0)):
         self_abs_rect = self.rect.move(parent_abs_pos)
@@ -118,7 +120,7 @@ class LineEdit(Control):
         if self.is_focused and event.type == pygame.KEYDOWN:
             now = pygame.time.get_ticks()
             if now - self.last_input_time < self.input_cooldown:
-                return True # 쿨다운 중이면 이벤트 소비만 함
+                return True
 
             if event.key == pygame.K_BACKSPACE:
                 self.text = self.text[:-1]
