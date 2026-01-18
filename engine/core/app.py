@@ -3,44 +3,33 @@ import sys
 from engine.graphics.renderer import Renderer
 from engine.graphics.lighting import LightingManager
 from engine.core.time import TimeManager
+from engine.core.input import InputManager
+from engine.net.network import NetworkManager
 
 class App:
-    instance = None
-
     def __init__(self, width=1280, height=720, title="8251Ngine"):
-        App.instance = self
         pygame.init()
         self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
         pygame.display.set_caption(title)
         self.clock = pygame.time.Clock()
         self.running = True
         
-        # Engine Components
-        self.renderer = Renderer(self.screen)
-        self.lighting = LightingManager(width, height)
-        self.time = TimeManager()
-        self.ui_root = None # Root for UI elements
+        # Core Engine Services
+        self.services = {
+            "input": InputManager(),
+            "renderer": Renderer(self.screen),
+            "lighting": LightingManager(width, height),
+            "time": TimeManager(),
+            "network": NetworkManager("ws://localhost:8765"),
+            "app": self # Allow access to app-level properties like fov_polygon
+        }
         
-        self.root = None # The active scene
-        self.fov_polygon = None 
+        self.ui_root = None
+        self.root = None # Active scene
+        self.fov_polygon = None # TODO: This should be managed by a better system
 
     def set_ui(self, ui_root):
         self.ui_root = ui_root
-
-    def _draw(self):
-        self.screen.fill((20, 20, 25)) # Dark Grey BG
-        
-        if self.root:
-            self.renderer.clear_queue()
-            self._collect_nodes(self.root)
-            self.renderer.flush()
-            self.lighting.render(self.screen, self.renderer.camera, self.fov_polygon)
-            
-        # 4. Render UI (Topmost)
-        if self.ui_root:
-            self.ui_root.draw(self.screen)
-            
-        pygame.display.flip() # Current frame visibility polygon
 
     def set_scene(self, scene_root):
         self.root = scene_root
@@ -48,14 +37,16 @@ class App:
             self.root._ready()
 
     def run(self):
-        from engine.core.input import Input
+        self.services["network"].start()
+        
         while self.running:
             dt = self.clock.tick(60) / 1000.0
-            Input.update()
+            
             self._handle_events()
             self._update(dt)
             self._draw()
         
+        self.services["network"].stop()
         pygame.quit()
         sys.exit()
 
@@ -64,51 +55,43 @@ class App:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.VIDEORESIZE:
-                # Handle resize
                 self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
-                self.renderer = Renderer(self.screen) # Re-init renderer camera bounds
-                self.lighting.update_resolution(event.w, event.h)
+                self.services["renderer"]._update_screen(self.screen)
+                self.services["lighting"].update_resolution(event.w, event.h)
 
     def _update(self, dt):
-        self.time.update(dt)
-        self.lighting.ambient_color = self.time.current_ambient
+        self.services["input"].update()
+        self.services["time"].update(dt)
+        self.services["lighting"].ambient_color = self.services["time"].current_ambient
         
         if self.root:
-            self.root._update(dt)
+            self.root._update(dt, self.services)
 
     def _draw(self):
-        self.screen.fill((20, 20, 25)) # Dark Grey BG
+        self.screen.fill((20, 20, 25))
+        
+        renderer = self.services["renderer"]
+        lighting = self.services["lighting"]
         
         if self.root:
-            # 1. Clear Queues
-            self.renderer.clear_queue()
-            # Note: We need to collect lights too. 
-            # A proper scene graph traversal would collect renderables AND lights.
-            # For now, let's assume lights register themselves to App.lighting or we traverse.
-            # Simple Traversal for this engine stage:
-            self._collect_nodes(self.root)
+            renderer.clear_queue()
             
-            # 2. Render Geometry
-            self.renderer.flush()
+            # Scene graph traversal for rendering and light collection
+            def _collect_nodes(node):
+                if not node.visible: return
+                renderer.submit(node)
+                if hasattr(node, 'get_light_surface'):
+                    if node not in lighting.lights:
+                        lighting.add_light(node)
+                for child in node.children:
+                    _collect_nodes(child)
             
-            # 3. Render Lighting Overlay
-            self.lighting.render(self.screen, self.renderer.camera, self.fov_polygon)
+            _collect_nodes(self.root)
+            
+            renderer.flush(self.services)
+            lighting.render(self.screen, renderer.camera, self.fov_polygon)
+            
+        if self.ui_root:
+            self.ui_root.draw(self.screen)
             
         pygame.display.flip()
-
-    def _collect_nodes(self, node):
-        """Recursive node collection for rendering systems"""
-        if not node.visible: return
-        
-        # Submit to Renderer if it's a visual object
-        # (Duck typing: has get_sprite)
-        self.renderer.submit(node)
-        
-        # Submit to Lighting if it's a light
-        # (Duck typing: is LightSource instance or has get_light_surface)
-        if hasattr(node, 'get_light_surface'):
-            if node not in self.lighting.lights:
-                self.lighting.add_light(node)
-                
-        for child in node.children:
-            self._collect_nodes(child)

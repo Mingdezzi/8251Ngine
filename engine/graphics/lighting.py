@@ -62,6 +62,9 @@ class LightingManager:
     def set_directional_light(self, light):
         self.directional_light = light
 
+    def add_light(self, light):
+        self.lights.append(light)
+
     def render(self, screen, camera, fov_polygon=None):
         # 1. Fill with ambient darkness
         self.lightmap.fill(self.ambient_color)

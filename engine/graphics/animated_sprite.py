@@ -8,16 +8,14 @@ class AnimatedSprite(Node):
         self.anim_player = AnimationPlayer()
         self.offset_y = 0 # For floating animations
 
-    def update(self, dt):
+    def update(self, dt, services):
         self.anim_player.update(dt)
-        super().update(dt)
+        super().update(dt, services)
 
     def get_sprite(self):
         frame = self.anim_player.get_current_frame()
         if frame:
-            # Check if we need to apply additional offsets (like bounce)
             if self.offset_y != 0:
-                # This logic could be complex, for now just return frame
                 pass
             return frame
         return None

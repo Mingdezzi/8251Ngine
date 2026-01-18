@@ -30,29 +30,30 @@ class Node:
             return self.parent.get_global_position() + self.position
         return self.position
 
-    # --- Lifecycle Methods (Godot Style) ---
+    # --- Lifecycle Methods (to be called by engine) ---
     def _ready(self):
         """Called when added to the scene tree"""
         pass
 
-    def _update(self, dt):
-        """Called every frame"""
+    def _update(self, dt, services):
+        """Called every frame by the App loop"""
         for child in self.children:
-            child._update(dt)
-        self.update(dt)
+            child._update(dt, services)
+        self.update(dt, services)
 
-    def _draw(self, renderer):
+    def _draw(self, services):
         """Called every frame for rendering"""
         if not self.visible: return
         
-        # Pre-order traversal? 
-        # Actually for Iso, we don't draw recursively immediately.
-        # We submit ourselves to the Renderer's Queue.
-        renderer.submit(self)
+        # Renderer is now a service
+        renderer = services.get("renderer")
+        if renderer:
+            renderer.submit(self)
         
         for child in self.children:
-            child._draw(renderer)
+            child._draw(services)
 
-    # User Override Methods
-    def update(self, dt):
+    # --- User Override Methods ---
+    def update(self, dt, services):
+        """User-overridable update method"""
         pass

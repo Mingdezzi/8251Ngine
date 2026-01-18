@@ -35,10 +35,9 @@ class Renderer:
                     'node': node # Keep ref for shadow calc
                 })
 
-    def flush(self):
+    def flush(self, services):
         # 1. Update Camera
-        if self.camera.is_following:
-            self.camera.update()
+        self.camera.update()
         
         # [Soft Shadow Pass]
         shadow_scale = 0.5
@@ -46,22 +45,21 @@ class Renderer:
         sh = int(self.screen.get_height() * shadow_scale)
         shadow_surf = pygame.Surface((sw, sh), pygame.SRCALPHA)
         
-        from engine.core.app import App
+        time_manager = services.get("time")
+        lighting_manager = services.get("lighting")
         
         # --- A. Directional Shadows (Sun/Moon) ---
-        if App.instance and App.instance.time:
-            sun_dir = App.instance.time.sun_direction
-            # Only draw if it's not pitch black
-            if App.instance.time.current_phase != 'NIGHT':
-                for item in self.render_queue:
-                    node = item['node']
-                    ShadowRenderer.draw_directional_shadow(shadow_surf, self.camera, node, sun_dir, scale=shadow_scale)
+        if time_manager and time_manager.current_phase != 'NIGHT':
+            sun_dir = time_manager.sun_direction
+            for item in self.render_queue:
+                node = item['node']
+                ShadowRenderer.draw_directional_shadow(shadow_surf, self.camera, node, sun_dir, scale=shadow_scale)
         
         # --- B. Point Light Shadows ---
         main_light = None
-        if App.instance and App.instance.lighting.lights:
-            for l in App.instance.lighting.lights:
-                if l.name == "PlayerLight":
+        if lighting_manager:
+            for l in lighting_manager.lights:
+                if l.name == "PlayerLight": # TODO: Don't hardcode this
                     main_light = l
                     break
         
