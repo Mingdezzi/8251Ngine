@@ -7,6 +7,7 @@ class Control:
         self.children = []
         self.parent = None
         self.is_hovered = False
+        self.is_focused = False
         self.on_click = None
         self.tag = tag
 
@@ -26,11 +27,14 @@ class Control:
             self.is_hovered = self.rect.collidepoint(event.pos)
         
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.is_hovered and self.on_click:
-                self.on_click()
+            was_focused = self.is_focused
+            self.is_focused = self.is_hovered
+            if self.is_hovered:
+                if self.on_click: self.on_click()
                 return True
+            return was_focused # Return true if we were focused but clicked away (to consume event)
         
-        return self.is_hovered
+        return False
 
     def draw(self, screen, services):
         if not self.visible: return
@@ -41,10 +45,12 @@ class Control:
     def _draw_self(self, screen, services):
         pass
 
-    def center_in_screen(self, screen_w, screen_h):
-        self.rect.x = (screen_w - self.rect.width) // 2
-        self.rect.y = (screen_h - self.rect.height) // 2
-        return self
+    def get_child_by_tag(self, tag):
+        for child in self.children:
+            if child.tag == tag: return child
+            res = child.get_child_by_tag(tag)
+            if res: return res
+        return None
 
     def to_dict(self):
         return {
@@ -71,7 +77,7 @@ class Label(Control):
             self._render_text()
 
     def _render_text(self):
-        self._surf = self.font.render(self.text, True, self.color)
+        self._surf = self.font.render(str(self.text), True, self.color)
         self.rect.width, self.rect.height = self._surf.get_size()
 
     def _draw_self(self, screen, services):
@@ -90,7 +96,7 @@ class Panel(Control):
         self._regen_surf()
 
     def _regen_surf(self):
-        self.surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        self.surf = pygame.Surface((max(1, self.rect.width), max(1, self.rect.height)), pygame.SRCALPHA)
         self.surf.fill(self.color)
 
     def _draw_self(self, screen, services):
@@ -116,7 +122,6 @@ class Button(Control):
         pygame.draw.rect(screen, color, self.rect)
         pygame.draw.rect(screen, (200, 200, 200), self.rect, 1)
         
-        # 텍스트 중앙 정렬
         tw, th = self.label._surf.get_size()
         self.label.rect.x = self.rect.x + (self.rect.width - tw) // 2
         self.label.rect.y = self.rect.y + (self.rect.height - th) // 2
@@ -125,3 +130,47 @@ class Button(Control):
         d = super().to_dict()
         d.update({"text": self.text, "base_color": list(self.base_color), "hover_color": list(self.hover_color)})
         return d
+
+class LineEdit(Control):
+    def __init__(self, text="", x=0, y=0, w=200, h=30, tag=""):
+        super().__init__(x, y, w, h, tag)
+        self.text = str(text)
+        self.on_text_changed = None # Callback (text) -> None
+        self.font = pygame.font.SysFont("arial", 18)
+        self.cursor_visible = True
+        self.cursor_timer = 0
+
+    def handle_event(self, event):
+        if super().handle_event(event): return True
+        
+        if self.is_focused and event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_BACKSPACE:
+                self.text = self.text[:-1]
+            elif event.key == pygame.K_RETURN:
+                self.is_focused = False
+            else:
+                if event.unicode.isprintable():
+                    self.text += event.unicode
+            
+            if self.on_text_changed:
+                self.on_text_changed(self.text)
+            return True
+        return False
+
+    def _draw_self(self, screen, services):
+        # Draw background
+        bg_col = (40, 40, 45) if not self.is_focused else (60, 60, 70)
+        pygame.draw.rect(screen, bg_col, self.rect)
+        border_col = (100, 100, 255) if self.is_focused else (100, 100, 100)
+        pygame.draw.rect(screen, border_col, self.rect, 2)
+        
+        # Draw text
+        txt_surf = self.font.render(self.text, True, (255, 255, 255))
+        screen.blit(txt_surf, (self.rect.x + 5, self.rect.y + (self.rect.height - txt_surf.get_height()) // 2))
+        
+        # Draw cursor
+        if self.is_focused:
+            self.cursor_timer += 1
+            if (self.cursor_timer // 30) % 2 == 0:
+                cx = self.rect.x + 8 + txt_surf.get_width()
+                pygame.draw.line(screen, (255, 255, 255), (cx, self.rect.y + 5), (cx, self.rect.bottom - 5), 2)

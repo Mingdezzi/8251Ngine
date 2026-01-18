@@ -43,6 +43,7 @@ class Renderer:
     def flush(self, services):
         # 1. Update Camera
         self.camera.update()
+        zoom = self.camera.zoom
         
         # [Soft Shadow Pass]
         shadow_scale = 0.5
@@ -85,13 +86,21 @@ class Renderer:
         self.render_queue.sort(key=lambda x: x['depth'])
         
         # 4. Draw Objects (Pass 2)
+        from engine.core.math_utils import TILE_HEIGHT
         for item in self.render_queue:
             sx, sy = self.camera.world_to_screen(*item['pos'])
             img = item['sprite']
             
+            # [Zoom Scaling]
+            if zoom != 1.0:
+                w = int(img.get_width() * zoom)
+                h = int(img.get_height() * zoom)
+                if w < 1 or h < 1: continue
+                img = pygame.transform.scale(img, (w, h))
+            
             # [Pivot Correction]
-            from engine.core.math_utils import TILE_HEIGHT
-            rect = img.get_rect(midbottom=(sx, sy + TILE_HEIGHT // 2))
+            offset_y = (TILE_HEIGHT // 2) * zoom
+            rect = img.get_rect(midbottom=(sx, sy + offset_y))
             
             # Final Screen Bound Check (Frustum Culling)
             if self.screen.get_rect().colliderect(rect):

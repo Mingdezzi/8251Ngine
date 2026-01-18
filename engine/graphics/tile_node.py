@@ -12,7 +12,7 @@ class TileNode(Node):
         self.position.y = y
         self.position.z = 0 # Base is always on floor
         self.layer = layer # 0: Floor, 1: Wall, 2: Furniture
-        self.size_z = size_z # [NEW] Height of the wall
+        self.size_z = size_z 
         
         self.sprite = None
         self._regen_sprite()
@@ -22,12 +22,27 @@ class TileNode(Node):
 
     def _regen_sprite(self):
         # Determine properties from ID
-        draw_color = TileEngine.TILE_DATA.get(self.tid, {}).get('color', (150, 150, 150))
+        data = TileEngine.TILE_DATA.get(self.tid, {})
+        draw_color = data.get('color', (150, 150, 150))
         
-        if self.layer == 0: # Flat Floor
-            self.sprite = TileEngine.create_texture(self.tid)
-            self.size_z = 0.05 # Near flat
-        else: # Wall or Furniture (3D Cube)
+        if self.layer == 0: # Flat Floor (바닥)
+            # 1. 서피스 생성
+            self.sprite = pygame.Surface((TILE_WIDTH, TILE_HEIGHT), pygame.SRCALPHA)
+            
+            # 2. IsoGeometry로 마름모 그리기
+            # [수정] y 좌표를 0으로 설정하여 서피스 맨 위부터 꽉 차게 그립니다.
+            IsoGeometry.draw_cube(
+                self.sprite, 
+                TILE_WIDTH // 2,   # x 중심 (32)
+                0,                 # y 시작점 (0) <--- 이 부분이 수정되었습니다.
+                TILE_WIDTH,        # 너비 (64)
+                TILE_HEIGHT,       # 높이 (32)
+                0,                 # 두께 (0)
+                draw_color
+            )
+            self.size_z = 0.05 
+
+        else: # Wall or Furniture (벽 또는 가구)
             h_px = int(self.size_z * HEIGHT_SCALE)
             self.sprite = pygame.Surface((TILE_WIDTH, TILE_HEIGHT + h_px), pygame.SRCALPHA)
             
@@ -37,8 +52,10 @@ class TileNode(Node):
             # Draw Cube with Tile color
             IsoGeometry.draw_cube(
                 self.sprite, 
-                TILE_WIDTH // 2, h_px, 
-                TILE_WIDTH, TILE_HEIGHT, 
+                TILE_WIDTH // 2, 
+                h_px, 
+                TILE_WIDTH, 
+                TILE_HEIGHT, 
                 h_px, 
                 draw_color
             )

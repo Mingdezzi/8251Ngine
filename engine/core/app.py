@@ -83,9 +83,13 @@ class App:
                 self.services["renderer"]._update_screen(self.screen)
                 self.services["lighting"].update_resolution(event.w, event.h)
             
-            if event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
-                if self.ui_root:
-                    self.ui_root.handle_event(event)
+            # [수정됨] 모든 이벤트를 UI와 Scene에 전달
+            if self.ui_root:
+                self.ui_root.handle_event(event)
+            
+            # Scene(Node)이 handle_event 메서드를 가지고 있다면 호출 (Zoom 처리를 위해)
+            if self.root and hasattr(self.root, 'handle_event'):
+                self.root.handle_event(event)
 
     def _update(self, dt):
         self.services["input"].update()

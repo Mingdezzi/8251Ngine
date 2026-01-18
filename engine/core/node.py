@@ -3,6 +3,7 @@ from pygame.math import Vector3
 class Node:
     def __init__(self, name="Node"):
         self.name = name
+        self.tag = name # [NEW] Tag for IDE identification
         self.parent = None
         self.children = []
         self.components = [] # New: Component list
