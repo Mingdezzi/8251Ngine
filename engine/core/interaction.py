@@ -1,36 +1,51 @@
-from engine.core.node import Node
+import pygame
+import time
 
-class Interactable(Node):
-    def __init__(self, name="Interactable", radius=1.2):
-        super().__init__(name)
-        self.radius = radius # 상호작용 가능 거리 (그리드 단위)
-        self.on_interact_callback = None
-        self.enabled = True
+class NoiseEvent:
+    def __init__(self, x, y, radius, color=(200, 200, 200), duration=1.0):
+        self.x, self.y = x, y
+        self.radius = radius
+        self.color = color
+        self.start_time = time.time()
+        self.duration = duration
+        self.alpha = 150
 
-    def interact(self, actor):
-        """actor: 상호작용을 시도하는 엔티티 (예: Player)"""
-        if not self.enabled: return False
+    def update(self):
+        elapsed = time.time() - self.start_time
+        progress = elapsed / self.duration
+        if progress > 1.0:
+            return False
         
-        # 거리 체크
-        dist = self.get_global_position().distance_to(actor.get_global_position())
-        if dist <= self.radius:
-            if self.on_interact_callback:
-                self.on_interact_callback(actor)
-                return True
-        return False
+        # Fade out alpha
+        self.alpha = int(150 * (1.0 - progress))
+        return True
 
-# 예시: 문 노드
-class Door(Node):
-    def __init__(self, name="Door"):
-        super().__init__(name)
-        self.is_open = False
-        
-        # 상호작용 노드 자식으로 추가
-        self.trigger = Interactable("DoorTrigger")
-        self.trigger.on_interact_callback = self.toggle
-        self.add_child(self.trigger)
+class InteractionManager:
+    def __init__(self):
+        self.noises = []
+        self.interactables = []
 
-    def toggle(self, actor):
-        self.is_open = not self.is_open
-        print(f"Door is now {'Open' if self.is_open else 'Closed'}")
-        # 여기서 애니메이션 재생이나 스프라이트 변경 로직
+    def emit_noise(self, x, y, radius, color=(200, 200, 200)):
+        self.noises.append(NoiseEvent(x, y, radius, color))
+
+    def register_interactable(self, node):
+        if node not in self.interactables:
+            self.interactables.append(node)
+
+    def update(self):
+        self.noises = [n for n in self.noises if n.update()]
+
+    def draw(self, screen, camera):
+        from engine.core.math_utils import IsoMath
+        for n in self.noises:
+            # World to Screen
+            ix, iy = IsoMath.cart_to_iso(n.x, n.y, 0)
+            sx, sy = camera.world_to_screen(ix, iy)
+            
+            # Draw expanding ring
+            elapsed = time.time() - n.start_time
+            curr_rad = int(n.radius * (elapsed / n.duration) * 32) # Scale to pixels
+            
+            s = pygame.Surface((curr_rad * 2, curr_rad * 2), pygame.SRCALPHA)
+            pygame.draw.circle(s, (*n.color, n.alpha), (curr_rad, curr_rad), curr_rad, 2)
+            screen.blit(s, (sx - curr_rad, sy - curr_rad))

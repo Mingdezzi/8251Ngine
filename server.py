@@ -5,7 +5,7 @@ import uuid
 
 connected_clients = {}
 
-async def handler(websocket, path):
+async def handler(websocket):
     client_id = str(uuid.uuid4())
     connected_clients[client_id] = websocket
     print(f"Client {client_id} connected.")

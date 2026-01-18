@@ -13,6 +13,11 @@ class Renderer:
         # Initial viewport setup
         self.camera.update_viewport(screen.get_width(), screen.get_height())
 
+    def _update_screen(self, screen):
+        """Called when window is resized"""
+        self.screen = screen
+        self.camera.update_viewport(screen.get_width(), screen.get_height())
+
     def clear_queue(self):
         self.render_queue.clear()
 

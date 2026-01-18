@@ -4,50 +4,60 @@ from engine.graphics.block import Block3D
 
 class MapLoader:
     @staticmethod
-    def load_scene(path, scene_root):
-        """Loads a JSON map file into the scene"""
+    def load_map(path, scene, collision_world):
         if not os.path.exists(path):
-            print(f"[Error] Map file not found: {path}")
-            return
+            print(f"MapLoader: File not found {path}")
+            return None # Return None to indicate failure or no metadata
 
         with open(path, 'r') as f:
             data = json.load(f)
 
-        width = data.get('width', 10)
-        height = data.get('height', 10)
-        layers = data.get('layers', {})
+        # 1. Load Metadata (New)
+        metadata = {
+            "width": data.get("width", 20),
+            "height": data.get("height", 20)
+        }
 
-        print(f"[Loader] Loading Map: {width}x{height}")
+        # 2. Load Blocks
+        for b_data in data.get("blocks", []):
+            block = Block3D(
+                name=b_data.get("name", "Wall"),
+                size_z=b_data.get("size_z", 1.0),
+                color=tuple(b_data.get("color", (100, 100, 110))),
+                zone_id=b_data.get("zone_id", 0),
+                interact_type=b_data.get("interact_type", "NONE"),
+                tile_id=b_data.get("tile_id", None)
+            )
+            block.position.x = b_data["pos"][0]
+            block.position.y = b_data["pos"][1]
+            block.position.z = b_data["pos"][2]
+            scene.add_child(block)
+            if collision_world and b_data.get("is_static", True):
+                collision_world.add_static(block)
 
-        # PxANIC map format: layers -> floor -> 2D array of [id, rot]
-        # We need to convert ID to Block3D properties
+        print(f"MapLoader: Successfully loaded {path}")
+        return metadata
+
+    @staticmethod
+    def save_map(path, scene, width=20, height=20):
+        # Implementation for Game Editor to save changes
+        data = {
+            "width": width,
+            "height": height,
+            "blocks": []
+        }
+        for child in scene.children:
+            if isinstance(child, Block3D):
+                data["blocks"].append({
+                    "name": child.name,
+                    "pos": [child.position.x, child.position.y, child.position.z],
+                    "size_z": child.size_z,
+                    "color": list(child.color),
+                    "zone_id": child.zone_id,
+                    "interact_type": child.interact_type,
+                    "tile_id": child.tile_id
+                })
         
-        # Floor Layer
-        if 'floor' in layers:
-            for y, row in enumerate(layers['floor']):
-                for x, cell in enumerate(row):
-                    tid = cell[0] if isinstance(cell, list) else cell
-                    if tid != 0:
-                        # Map ID to Color/Size (Placeholder logic)
-                        color = (100, 100, 100)
-                        if tid == 1110001: color = (60, 120, 60) # Grass
-                        elif tid == 1110000: color = (100, 80, 50) # Dirt
-                        
-                        tile = Block3D(name=f"Floor_{x}_{y}", size_z=0.1, color=color)
-                        tile.position.x = x
-                        tile.position.y = y
-                        scene_root.add_child(tile)
-
-        # Wall/Object Layer
-        if 'wall' in layers:
-            for y, row in enumerate(layers['wall']):
-                for x, cell in enumerate(row):
-                    tid = cell[0] if isinstance(cell, list) else cell
-                    if tid != 0:
-                        wall = Block3D(name=f"Wall_{x}_{y}", size_z=1.5, color=(120, 120, 130))
-                        wall.position.x = x
-                        wall.position.y = y
-                        scene_root.add_child(wall)
-                        
-                        # Add to physics? Scene needs reference to CollisionWorld
-                        # This part needs decoupling in full engine.
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=4)

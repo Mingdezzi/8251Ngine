@@ -1,20 +1,27 @@
 import pygame
 import os
 
-class Assets:
-    _textures = {}
+class ResourceManager:
+    def __init__(self):
+        self.images = {}
+        self.fonts = {}
+        self.base_path = "assets"
 
-    @staticmethod
-    def load_texture(name, path):
-        if name not in Assets._textures:
-            if os.path.exists(path):
-                img = pygame.image.load(path).convert_alpha()
-                Assets._textures[name] = img
-            else:
-                print(f"[Error] Asset path not found: {path}")
+    def get_image(self, filename):
+        if filename not in self.images:
+            path = os.path.join(self.base_path, "images", filename)
+            try:
+                self.images[filename] = pygame.image.load(path).convert_alpha()
+            except:
+                print(f"ResourceManager: Failed to load image {path}")
                 return None
-        return Assets._textures[name]
+        return self.images[filename]
 
-    @staticmethod
-    def get(name):
-        return Assets._textures.get(name)
+    def get_font(self, name, size):
+        key = (name, size)
+        if key not in self.fonts:
+            try:
+                self.fonts[key] = pygame.font.SysFont(name, size)
+            except:
+                self.fonts[key] = pygame.font.Font(None, size)
+        return self.fonts[key]

@@ -48,4 +48,5 @@ class InputManager:
         mx, my = pygame.mouse.get_pos()
         wx = (mx - camera.offset.x) / camera.zoom + camera.position.x
         wy = (my - camera.offset.y) / camera.zoom + camera.position.y
-        return IsoMath.iso_to_cart(wx, wy)
+        cart_pos = IsoMath.iso_to_cart(wx, wy)
+        return pygame.math.Vector2(cart_pos[0], cart_pos[1])
